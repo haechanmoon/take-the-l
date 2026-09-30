@@ -18,6 +18,8 @@ type Player = {
 };
 type RoomInfo = { number: number; id: string; count: number; capacity: number };
 type Snapshot = { id: string; number: number; players: Player[] };
+type AudioLevels = { music: number; voice: number };
+const DEFAULT_AUDIO_LEVELS: AudioLevels = { music: 0.6, voice: 0.4 };
 
 const GAME_SERVER = process.env.NEXT_PUBLIC_GAME_SERVER;
 function gameServerUrl() {
@@ -428,14 +430,15 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
 });
 
 function CameraAim({ focus }: { focus?: Player }) {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const target = useRef(new Vector3());
   const lookTarget = useRef(new Vector3());
   const desiredLookTarget = useRef(new Vector3());
   useFrame((_, delta) => {
     const x = focus?.x ?? 0;
     const z = focus?.z ?? 0;
-    target.current.set(x, focus ? 9 : 19, z + (focus ? 11 : 22));
+    const portrait = size.height > size.width;
+    target.current.set(x, focus ? (portrait ? 11 : 9) : 19, z + (focus ? (portrait ? 14 : 11) : 22));
     const blend = 1 - Math.exp(-4 * delta);
     camera.position.lerp(target.current, blend);
     desiredLookTarget.current.set(x, 0, z);
@@ -476,6 +479,7 @@ export default function Game() {
   const [roomNumber, setRoomNumber] = useState<number | null>(null);
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   const [muted, setMuted] = useState(false);
+  const [audioLevels, setAudioLevels] = useState<AudioLevels>(DEFAULT_AUDIO_LEVELS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -484,9 +488,10 @@ export default function Game() {
   const playersRef = useRef<Record<string, Player>>({});
   const ownIdRef = useRef<string | null>(null);
   const mutedRef = useRef(false);
+  const audioLevelsRef = useRef<AudioLevels>(DEFAULT_AUDIO_LEVELS);
   const activeAudio = useRef(0);
   const music = useRef<HTMLAudioElement | null>(null);
-  const voices = useRef(new Set<HTMLAudioElement>());
+  const voices = useRef(new Map<HTMLAudioElement, number>());
   const keys = useRef(new Set<string>());
   const joystickRef = useRef({ x: 0, z: 0 });
   const bubbleTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -495,17 +500,43 @@ export default function Game() {
   useEffect(() => { ownIdRef.current = ownId; }, [ownId]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
-  const startMusic = useCallback(() => {
-    if (mutedRef.current || document.hidden || !music.current) return;
-    music.current.volume = activeAudio.current ? 0.04 : 0.16;
-    void music.current.play().catch(() => {});
+  const applyMusicVolume = useCallback(() => {
+    if (music.current) music.current.volume = audioLevelsRef.current.music * (activeAudio.current ? 0.85 : 1);
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("take-the-l-audio") || "null") as AudioLevels | null;
+      if (saved && Number.isFinite(saved.music) && Number.isFinite(saved.voice)) {
+        const next = { music: Math.max(0, Math.min(1, saved.music)), voice: Math.max(0, Math.min(1, saved.voice)) };
+        audioLevelsRef.current = next;
+        setAudioLevels(next);
+        applyMusicVolume();
+      }
+    } catch { /* Sound controls still work when browser storage is unavailable. */ }
+  }, [applyMusicVolume]);
+
+  const changeAudioLevel = (key: keyof AudioLevels, value: number) => {
+    const next = { ...audioLevelsRef.current, [key]: value };
+    audioLevelsRef.current = next;
+    setAudioLevels(next);
+    applyMusicVolume();
+    for (const [audio, gain] of voices.current) audio.volume = next.voice * gain;
+    try { localStorage.setItem("take-the-l-audio", JSON.stringify(next)); } catch { /* Optional preference. */ }
+  };
+
+  const startMusic = useCallback(() => {
+    if (mutedRef.current || document.hidden || !music.current) return;
+    applyMusicVolume();
+    void music.current.play().catch(() => {});
+  }, [applyMusicVolume]);
+
   const stopVoices = useCallback(() => {
-    for (const audio of voices.current) audio.pause();
+    for (const audio of voices.current.keys()) audio.pause();
     voices.current.clear();
     activeAudio.current = 0;
-  }, []);
+    applyMusicVolume();
+  }, [applyMusicVolume]);
 
   useEffect(() => {
     if (!roomNumber) return;
@@ -571,22 +602,23 @@ export default function Game() {
     const dance = DANCES.find((item) => item.id === id);
     if (!dance) return;
     const audio = new Audio(dance.audio);
-    audio.volume = dancerId === ownIdRef.current ? 0.8 : 0.35;
-    voices.current.add(audio);
+    const gain = dancerId === ownIdRef.current ? 1 : 0.45;
+    audio.volume = audioLevelsRef.current.voice * gain;
+    voices.current.set(audio, gain);
     activeAudio.current += 1;
-    if (music.current) music.current.volume = 0.04;
+    applyMusicVolume();
     let released = false;
     const finished = () => {
       if (released) return;
       released = true;
       voices.current.delete(audio);
       activeAudio.current = voices.current.size;
-      if (music.current) music.current.volume = activeAudio.current ? 0.04 : 0.16;
+      applyMusicVolume();
     };
     audio.addEventListener("ended", finished, { once: true });
     audio.addEventListener("error", finished, { once: true });
     void audio.play().catch(finished);
-  }, []);
+  }, [applyMusicVolume]);
 
   const join = useCallback(async (requestedRoom?: number) => {
     const nickname = name.trim();
@@ -668,11 +700,12 @@ export default function Game() {
   useEffect(() => {
     if (!roomNumber) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement) return;
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
         event.preventDefault();
         keys.current.add(event.key);
       }
-      if (event.repeat || event.target instanceof HTMLInputElement) return;
+      if (event.repeat) return;
       const dance = DANCES.find((item) => item.key.toLowerCase() === event.key.toLowerCase());
       if (dance) {
         startMusic();
@@ -772,8 +805,16 @@ export default function Game() {
             <summary aria-label="게임 메뉴">☰</summary>
             <div className="menu-body">
               <div className="playing-actions">
-                <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "링크 복사"}</button>
+                <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "이 방 링크 복사"}</button>
                 <button onClick={() => void leave()}>나가기</button>
+              </div>
+              <div className="audio-settings">
+                <label htmlFor="music-volume">브금 <output>{Math.round(audioLevels.music * 100)}%</output></label>
+                <input id="music-volume" type="range" min="0" max="100" step="5" value={Math.round(audioLevels.music * 100)}
+                  onChange={(event) => changeAudioLevel("music", Number(event.target.value) / 100)} />
+                <label htmlFor="voice-volume">목소리 <output>{Math.round(audioLevels.voice * 100)}%</output></label>
+                <input id="voice-volume" type="range" min="0" max="100" step="5" value={Math.round(audioLevels.voice * 100)}
+                  onChange={(event) => changeAudioLevel("voice", Number(event.target.value) / 100)} />
               </div>
               <div className="bubble-panel"><span>말풍선</span><div>{BUBBLES.map((text) => <button key={text} onClick={() => roomRef.current?.send("bubble", text)}>{text}</button>)}</div></div>
               <div className="room-switch"><span>방 바꾸기</span><div>{rooms.map((info) => <button key={info.number} disabled={busy || info.count >= info.capacity || info.number === roomNumber}
@@ -796,6 +837,5 @@ export default function Game() {
         </>}
       </section>
     </div>
-    <div className="rotate-overlay"><div className="rotate-icon">↻</div><h2>휴대폰을 가로로 돌려 줘!</h2></div>
   </>;
 }
