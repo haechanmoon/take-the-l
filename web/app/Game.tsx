@@ -19,7 +19,7 @@ type Player = {
 type RoomInfo = { number: number; id: string; count: number; capacity: number };
 type Snapshot = { id: string; number: number; players: Player[] };
 type AudioLevels = { music: number; voice: number };
-const DEFAULT_AUDIO_LEVELS: AudioLevels = { music: 0.6, voice: 0.4 };
+const DEFAULT_AUDIO_LEVELS: AudioLevels = { music: 0.7, voice: 0.4 };
 
 const GAME_SERVER = process.env.NEXT_PUBLIC_GAME_SERVER;
 function gameServerUrl() {
@@ -768,14 +768,14 @@ export default function Game() {
   const currentDance = ownId ? players[ownId]?.dance : null;
 
   return <>
-    <audio ref={music} src="/audio/bgm-no-voice.wav" loop preload="none" />
+    <audio ref={music} src="/audio/gajyeoga.wav" loop preload="none" />
     <div className="game-shell">
       <section className="stage-panel" aria-label="춤추는 놀이터">
         <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} focus={ownId ? players[ownId] : undefined} /></div>
-        <div className="brand-badge"><span className="brand-icon">L</span><span>TAKE THE L</span></div>
+        <div className="brand-badge"><span className="brand-icon">L</span><span>L을 가져가</span></div>
         {!roomNumber ? <form className="join-panel" onSubmit={(event) => { event.preventDefault(); void join(selectedRoom ?? undefined); }}>
           <h1>L을 가져가!</h1>
-          <label htmlFor="nickname">닉네임 · 바꿔도 돼</label>
+          <label htmlFor="nickname">닉네임 변경 가능</label>
           <input id="nickname" autoComplete="off" maxLength={12} value={name}
             onChange={(event) => setName(event.target.value)} placeholder="닉네임을 써 줘" />
           <div className="room-grid" aria-label="공개방 선택">
