@@ -1,6 +1,14 @@
 # 첫 공개 배포 구성
 
-아직 공개 배포되지 않았다. 로컬 검증을 마친 코드와 서버 설정을 준비한 상태다.
+2026-09-30 공개 배포를 완료했다. 공개 HTTPS/WSS에서 두 명의 입장·춤·말풍선·이동·퇴장을 검증했고, 두 브라우저에서 서로의 캐릭터를 확인했다.
+
+- 웹 주소: https://take-the-l.vercel.app
+- 게임 서버: https://take-the-l.13.209.111.184.sslip.io
+- 상태 확인: 게임 서버의 `/health`, 집계 확인: `/stats`.
+- EC2 인스턴스: `i-063ddc62afd29482d`.
+- 고정 IP: `13.209.111.184`, 할당 ID: `eipalloc-05f23379b85b483e3`.
+- 전용 보안 그룹: `sg-025faf649497dbc5d`. 80/443은 공개, SSH는 배포 시 관리자의 공인 IP 한 개만 허용한다.
+- GitHub 저장소: https://github.com/haechanmoon/take-the-l. Vercel GitHub 앱 설치가 없어 자동 배포 연결은 아직 완료되지 않았다. 현재 공개 버전은 Vercel CLI로 배포했다.
 
 - 웹: 기존 Vercel `take-the-l` 프로젝트, 저장소 루트 `web`, Node.js 22.
 - 게임 서버: 서울 리전 EC2 `t4g.micro` 한 대, ARM, 2 vCPU / 1 GiB RAM.
@@ -16,14 +24,16 @@
 
 AWS 계정 전체에 월 $17 비용 예산을 만들었다. 실제 비용 50% / 80% / 100%, 예상 비용 100%에서 사용자가 지정한 이메일로 알린다. 원화 3만 원의 고정 상한이 아니며 자동 차단 기능도 없다. 계정의 다른 서비스 비용과 이번 달에 이미 사용한 비용도 포함된다.
 
-## 공개 전 마지막 단계
+## 재배포 순서
 
-1. 배포 보류 해제 및 위 구성의 실제 리소스 생성 승인을 받는다.
-2. 전용 보안 그룹, EC2와 공인 IP를 만들고 `deploy/bootstrap.sh`로 준비한다.
+1. 기존 EC2와 공인 IP를 사용한다. 같은 서버를 다시 만들지 않는다.
+2. 서버를 새로 만드는 경우에만 `deploy/bootstrap.sh`로 준비한다. Amazon Linux의 기본 `curl-minimal`을 사용하므로 별도의 `curl` 패키지를 중복 설치하지 않는다.
 3. 빌드된 서버와 잠금 파일을 복사하고 운영 의존성을 설치한다.
 4. 서버 환경 변수와 HTTPS 호스트를 설정하고 `playground.service` / `caddy.service`를 시작한다.
 5. Vercel의 `NEXT_PUBLIC_GAME_SERVER` / `NEXT_PUBLIC_SITE_URL`을 설정하고 배포한다.
 6. 공개 HTTPS 주소에서 두 명의 입장·이동·춤·말풍선과 브금·음소거를 확인한다. 실제 휴대폰 확인은 별도로 진행한다.
+
+웹만 수정할 때는 저장소 루트에서 `npx vercel@latest deploy --prod`로 배포할 수 있다. GitHub 자동 배포를 쓰려면 https://github.com/apps/vercel 에서 이 저장소의 접근을 연결해야 한다.
 
 ## 종료할 때
 
