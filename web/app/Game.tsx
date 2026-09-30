@@ -134,7 +134,7 @@ function CameraAim() {
 }
 
 function Scene({ players, bubbles }: { players: Player[]; bubbles: Record<string, string> }) {
-  return <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 21, 24], fov: 44, near: 0.1, far: 100 }}>
+  return <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 19, 22], fov: 44, near: 0.1, far: 100 }}>
     <CameraAim />
     <color attach="background" args={["#90cbe5"]} />
     <ambientLight intensity={1.35} />
@@ -359,76 +359,60 @@ export default function Game() {
   const currentDance = ownId ? players[ownId]?.dance : null;
 
   return <>
-    <div className="site-shell">
-      <header className="site-header">
-        <div className="wordmark"><span className="brand-icon">L</span><span>TAKE THE L</span></div>
-        <div className="header-right"><span className="live-dot" /> 공개 놀이터 <span className="header-rule" /> 로그인 필요 없음</div>
-      </header>
-      <div className="game-layout">
-        <aside className="side-panel">
-          <div className="hero-copy">
-            <p className="eyebrow">JUST SHOW UP &amp; DANCE</p>
-            <h1><span>L을</span><br />가져가<span className="bang">!</span></h1>
-            <p className="lead">별일 없어. 그냥 모여서 춤추는 거야.</p>
+    <div className="game-shell">
+      <section className="stage-panel" aria-label="춤추는 놀이터">
+        <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} /></div>
+        <div className="brand-badge"><span className="brand-icon">L</span><span>TAKE THE L</span></div>
+        {!roomNumber ? <form className="join-panel" onSubmit={(event) => { event.preventDefault(); void join(selectedRoom ?? undefined); }}>
+          <h1>L을 가져가!</h1>
+          <label htmlFor="nickname">닉네임</label>
+          <input id="nickname" autoComplete="off" maxLength={12} value={name}
+            onChange={(event) => setName(event.target.value)} placeholder="닉네임을 써 줘" />
+          <div className="room-grid" aria-label="공개방 선택">
+            {Array.from({ length: 5 }, (_, index) => {
+              const info = rooms.find((item) => item.number === index + 1);
+              const full = info ? info.count >= info.capacity : false;
+              return <button key={index} type="button" disabled={full}
+                aria-pressed={selectedRoom === index + 1}
+                className={`room-pill ${selectedRoom === index + 1 ? "selected" : ""}`}
+                onClick={() => setSelectedRoom(selectedRoom === index + 1 ? null : index + 1)}>
+                <strong>{index + 1}</strong><small>{info ? info.count : "—"}/20</small>
+              </button>;
+            })}
           </div>
-          {!roomNumber ? <div className="join-panel">
-            <div className="card-title"><span className="number-chip">01</span><h2>놀이터 입장</h2></div>
-            <label htmlFor="nickname">너의 닉네임</label>
-            <input id="nickname" autoComplete="off" maxLength={12} value={name}
-              onChange={(event) => setName(event.target.value)} placeholder="닉네임을 써 줘"
-              onKeyDown={(event) => { if (event.key === "Enter") void join(selectedRoom ?? undefined); }} />
-            <div className="room-picker">
-              <p>공개방 선택 <span>안 고르면 사람이 있는 방으로!</span></p>
-              <div className="room-grid">
-                {Array.from({ length: 5 }, (_, index) => {
-                  const info = rooms.find((item) => item.number === index + 1);
-                  const full = info ? info.count >= info.capacity : false;
-                  return <button key={index} type="button" disabled={full}
-                    className={`room-pill ${selectedRoom === index + 1 ? "selected" : ""}`}
-                    onClick={() => setSelectedRoom(selectedRoom === index + 1 ? null : index + 1)}>
-                    <strong>{index + 1}번방</strong><small>{info ? `${info.count}/${info.capacity}` : "—/20"}</small>
-                  </button>;
-                })}
+          <button className="primary-button" type="submit" disabled={busy}>{busy ? "입장 중..." : "들어가기 ↗"}</button>
+          {error && <p role="alert" className="error-text">{error} <button type="button" onClick={() => void refreshRooms()}>다시 연결</button></p>}
+        </form> : <div className="game-hud">
+          <div className="room-badge"><span className="live-dot" /> {roomNumber}번방 <small>{playerList.length}/20</small></div>
+          <details className="playing-menu">
+            <summary aria-label="게임 메뉴">☰</summary>
+            <div className="menu-body">
+              <div className="playing-actions">
+                <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "링크 복사"}</button>
+                <button onClick={() => setMuted(!muted)}>{muted ? "소리 켜기" : "소리 끄기"}</button>
+                <button onClick={() => void leave()}>나가기</button>
               </div>
+              <div className="bubble-panel"><span>말풍선</span><div>{BUBBLES.map((text) => <button key={text} onClick={() => roomRef.current?.send("bubble", text)}>{text}</button>)}</div></div>
+              <div className="room-switch"><span>방 바꾸기</span><div>{rooms.map((info) => <button key={info.number} disabled={busy || info.count >= info.capacity || info.number === roomNumber}
+                onClick={() => void join(info.number)}>{info.number}</button>)}</div></div>
+              {error && <p role="alert" className="error-text">{error}</p>}
             </div>
-            <button className="primary-button" disabled={busy} onClick={() => void join(selectedRoom ?? undefined)}>{busy ? "들어가는 중..." : "춤추러 들어가기 ↗"}</button>
-            {error && <p role="alert" className="error-text">{error} <button onClick={() => void refreshRooms()}>다시 연결</button></p>}
-            <p className="tiny-note">닉네임은 저장되지 않아. 다른 사람이 만든 말풍선은 없어.</p>
-          </div> : <div className="playing-panel">
-            <div className="playing-heading"><span className="live-dot" /><strong>{roomNumber}번방</strong><span>{playerList.length}/20명 춤추는 중</span></div>
-            <p>방 링크를 보내면 친구도 바로 들어올 수 있어.</p>
-            <div className="playing-actions">
-              <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "방 링크 복사 ↗"}</button>
-              <button onClick={() => setMuted(!muted)}>{muted ? "소리 켜기" : "소리 끄기"}</button>
-              <button onClick={() => void leave()}>나가기</button>
-            </div>
-            <div className="bubble-panel"><span>말풍선</span><div>{BUBBLES.map((text) => <button key={text} onClick={() => roomRef.current?.send("bubble", text)}>{text}</button>)}</div></div>
-            <div className="room-switch"><span>방 바꾸기</span><div>{rooms.map((info) => <button key={info.number} disabled={busy || info.count >= info.capacity || info.number === roomNumber}
-              onClick={() => void join(info.number)}>{info.number}</button>)}</div></div>
-            {error && <p role="alert" className="error-text">{error}</p>}
-          </div>}
-          <div className="side-footer"><span>Q W E R T</span><span>↖ DANCE ANYWHERE</span></div>
-        </aside>
-        <section className="stage-panel" aria-label="춤추는 놀이터">
-          <div className="stage-top"><span><span className="live-dot" /> {roomNumber ? `${roomNumber}번방 LIVE` : "LIVE PREVIEW"}</span><span>TAKE THE L · PLAYGROUND</span></div>
-          <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} /></div>
-          {!roomNumber && <div className="stage-sticker">여기서<br /><strong>만나!</strong></div>}
-          {roomNumber && <>
-            <div className="dance-tray">{DANCES.map((dance) => <button key={dance.id}
-              className={currentDance === dance.id ? "active" : ""}
-              onClick={() => roomRef.current?.send("dance", dance.id)}>
-              <kbd>{dance.key}</kbd><span>{dance.title}</span>
-            </button>)}</div>
-            <div className="joystick" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); moveJoystick(event); }}
-              onPointerMove={(event) => { if (event.buttons) moveJoystick(event); }}
-              onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick}>
-              <div className="joystick-knob" style={{ transform: `translate(${joystick.x * 31}px, ${joystick.z * 31}px)` }} />
-            </div>
-          </>}
-          <div className="stage-bottom"><span>↗ 친구랑 같이 들어와 봐</span><span>PC 방향키 · 모바일 조이스틱</span></div>
-        </section>
-      </div>
+          </details>
+        </div>}
+        {roomNumber && <>
+          <div className="dance-tray">{DANCES.map((dance) => <button key={dance.id}
+            className={currentDance === dance.id ? "active" : ""}
+            onClick={() => roomRef.current?.send("dance", dance.id)}>
+            <kbd>{dance.key}</kbd><span>{dance.title}</span>
+          </button>)}</div>
+          <div className="joystick" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); moveJoystick(event); }}
+            onPointerMove={(event) => { if (event.buttons) moveJoystick(event); }}
+            onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick}>
+            <div className="joystick-knob" style={{ transform: `translate(${joystick.x * 31}px, ${joystick.z * 31}px)` }} />
+          </div>
+        </>}
+      </section>
     </div>
-    <div className="rotate-overlay"><div className="rotate-icon">↻</div><h2>휴대폰을 가로로 돌려 줘!</h2><p>놀이터가 더 잘 보여.</p></div>
+    <div className="rotate-overlay"><div className="rotate-icon">↻</div><h2>휴대폰을 가로로 돌려 줘!</h2></div>
   </>;
 }
