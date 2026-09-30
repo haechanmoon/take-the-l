@@ -314,7 +314,7 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
       <mesh ref={rightForearm} castShadow><boxGeometry args={[0.4, 1, 0.48]} /><meshStandardMaterial color={player.color} /></mesh>
       <group ref={leftHand}><mesh castShadow><boxGeometry args={[0.4, 0.22, 0.48]} /><meshStandardMaterial color="#ffdfae" /></mesh></group>
       <group ref={rightHand}>
-        {player.dance === "take-l" ? <group>
+        {player.dance === "take-l" ? <group scale={[-1, 1, 1]}>
           <mesh castShadow><boxGeometry args={[0.35, 0.3, 0.48]} /><meshStandardMaterial color="#ffdfae" /></mesh>
           <mesh castShadow position={[-0.09, 0.25, 0]}><boxGeometry args={[0.14, 0.37, 0.28]} /><meshStandardMaterial color="#ffdfae" /></mesh>
           <mesh castShadow position={[0.21, 0.08, 0]}><boxGeometry args={[0.35, 0.14, 0.28]} /><meshStandardMaterial color="#ffdfae" /></mesh>
