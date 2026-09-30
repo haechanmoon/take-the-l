@@ -187,6 +187,15 @@ class PlaygroundRoom extends Room {
 }
 
 const origin = process.env.WEB_ORIGIN || "http://localhost:3000";
+function allowedOrigin(value: string | undefined) {
+  if (value === origin) return true;
+  if (process.env.NODE_ENV === "production" || !value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && url.port === "3000" &&
+      /^(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})$/.test(url.hostname);
+  } catch { return false; }
+}
 const server = defineServer({
   publicAddress: process.env.PUBLIC_ADDRESS,
   rooms: Object.fromEntries(
@@ -197,8 +206,8 @@ const server = defineServer({
   ),
   express: (app) => {
     app.use((request: Request, response: Response, next: NextFunction) => {
-      if (request.headers.origin === origin) {
-        response.header("Access-Control-Allow-Origin", origin);
+      if (allowedOrigin(request.headers.origin)) {
+        response.header("Access-Control-Allow-Origin", request.headers.origin!);
         response.header("Vary", "Origin");
         response.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
         response.header("Access-Control-Allow-Headers", "Content-Type");

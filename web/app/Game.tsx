@@ -2,9 +2,9 @@
 
 import { Client, type Room } from "@colyseus/sdk";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Group, Mesh, Sprite, Texture } from "three";
-import { CanvasTexture, LinearFilter } from "three";
+import { CanvasTexture, LinearFilter, Vector3 } from "three";
 
 type DanceId = "take-l" | "honey" | "vegetable" | "selfie" | "criss-cross";
 type Player = {
@@ -19,7 +19,10 @@ type Player = {
 type RoomInfo = { number: number; id: string; count: number; capacity: number };
 type Snapshot = { id: string; number: number; players: Player[] };
 
-const GAME_SERVER = process.env.NEXT_PUBLIC_GAME_SERVER || "http://localhost:2567";
+const GAME_SERVER = process.env.NEXT_PUBLIC_GAME_SERVER;
+function gameServerUrl() {
+  return GAME_SERVER || `http://${window.location.hostname}:2567`;
+}
 const DANCES: { id: DanceId; key: string; title: string; audio: string }[] = [
   { id: "take-l", key: "Q", title: "L을 가져가", audio: "/audio/take-l.m4a" },
   { id: "honey", key: "W", title: "크림치즈허니", audio: "/audio/honey.m4a" },
@@ -28,6 +31,12 @@ const DANCES: { id: DanceId; key: string; title: string; audio: string }[] = [
   { id: "criss-cross", key: "T", title: "크리스크로스", audio: "/audio/criss-cross.m4a" },
 ];
 const BUBBLES = ["L을 가져가!", "같이 춤춰!", "ㅋㅋㅋ", "안녕!", "한 번 더!"];
+function randomNickname() {
+  const adjectives = ["춤추는", "신나는", "말랑한", "통통한", "엉뚱한", "반짝이는"];
+  const friends = ["감자", "치즈", "오리", "당근", "만두", "두부"];
+  const pick = (items: string[]) => items[Math.floor(Math.random() * items.length)];
+  return `${pick(adjectives)}${pick(friends)}${Math.floor(Math.random() * 900) + 100}`;
+}
 const DEMO_PLAYERS: Player[] = [
   { id: "demo-1", name: "춤추는 감자", x: -3.6, z: 0.4, color: "#ff7867", dance: "take-l", facing: 0.3 },
   { id: "demo-2", name: "치즈", x: 1.1, z: -1.5, color: "#f8c14b", dance: "honey", facing: -0.2 },
@@ -59,83 +68,287 @@ function NameTag({ name, bubble }: { name: string; bubble?: string }) {
   useEffect(() => () => { nameTexture.dispose(); bubbleTexture?.dispose(); }, [nameTexture, bubbleTexture]);
   return (
     <>
-      <sprite position={[0, 3.25, 0]} scale={[2.6, 0.65, 1]}>
+      <sprite position={[0, 3.22, 0]} scale={[1.8, 0.45, 1]}>
         <spriteMaterial map={nameTexture} transparent depthTest={false} />
       </sprite>
-      {bubbleTexture && <sprite position={[0, 4.05, 0]} scale={[2.8, 0.7, 1]}>
+      {bubbleTexture && <sprite position={[0, 3.8, 0]} scale={[2.1, 0.52, 1]}>
         <spriteMaterial map={bubbleTexture} transparent depthTest={false} />
       </sprite>}
     </>
   );
 }
 
-function Avatar({ player, bubble }: { player: Player; bubble?: string }) {
+type Point = [number, number, number];
+type Pose = {
+  hop: number;
+  lean: number;
+  turn: number;
+  headTilt: number;
+  leftElbow: Point;
+  leftHand: Point;
+  rightElbow: Point;
+  rightHand: Point;
+  leftLegLift: number;
+  rightLegLift: number;
+  leftLegSwing: number;
+  rightLegSwing: number;
+  leftLegSpread: number;
+  rightLegSpread: number;
+};
+
+const DANCE_SECONDS: Record<DanceId, number> = {
+  "take-l": 3.24,
+  honey: 2.32,
+  vegetable: 2.17,
+  selfie: 1.68,
+  "criss-cross": 1.98,
+};
+
+function createPose(): Pose {
+  return {
+    hop: 0,
+    lean: 0,
+    turn: 0,
+    headTilt: 0,
+    leftElbow: [-1.05, -0.05, 0], leftHand: [-1.02, -0.57, 0.03],
+    rightElbow: [1.05, -0.05, 0], rightHand: [1.02, -0.57, 0.03],
+    leftLegLift: 0, rightLegLift: 0,
+    leftLegSwing: 0, rightLegSwing: 0,
+    leftLegSpread: 0, rightLegSpread: 0,
+  };
+}
+
+function setPoint(point: Point, x: number, y: number, z: number) {
+  point[0] = x;
+  point[1] = y;
+  point[2] = z;
+}
+
+const poseNumbers = ["hop", "lean", "turn", "headTilt", "leftLegLift", "rightLegLift", "leftLegSwing", "rightLegSwing", "leftLegSpread", "rightLegSpread"] as const;
+const posePoints = ["leftElbow", "leftHand", "rightElbow", "rightHand"] as const;
+
+function blendPose(current: Pose, target: Pose, amount: number) {
+  for (const key of poseNumbers) current[key] += (target[key] - current[key]) * amount;
+  for (const key of posePoints) {
+    for (let axis = 0; axis < 3; axis++) current[key][axis] += (target[key][axis] - current[key][axis]) * amount;
+  }
+}
+
+function smoothBeat(value: number) {
+  const blend = Math.max(0, Math.min(1, 0.5 + value / 0.9));
+  return blend * blend * (3 - 2 * blend);
+}
+
+// Reuse the same pose and points instead of creating arrays for every rendered frame.
+function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
+  for (const key of poseNumbers) pose[key] = 0;
+  pose.hop = Math.sin(seconds * 2) * 0.025;
+  setPoint(pose.leftElbow, -1.05, -0.05, 0);
+  setPoint(pose.leftHand, -1.02, -0.57, 0.03);
+  setPoint(pose.rightElbow, 1.05, -0.05, 0);
+  setPoint(pose.rightHand, 1.02, -0.57, 0.03);
+  if (!dance) return;
+
+  const cycle = seconds / DANCE_SECONDS[dance] * Math.PI * 2;
+  if (dance === "take-l") {
+    const step = Math.sin(cycle * 4);
+    const kick = Math.cos(cycle * 4);
+    pose.hop = 0.08 + Math.max(0, step) * 0.17;
+    pose.lean = kick * 0.11;
+    pose.headTilt = -0.1;
+    pose.leftLegLift = Math.max(0, kick) * 0.28;
+    pose.rightLegLift = Math.max(0, -kick) * 0.28;
+    pose.leftLegSwing = 0.35 + kick * 0.35;
+    pose.rightLegSwing = 0.35 - kick * 0.35;
+    pose.leftLegSpread = -0.12;
+    pose.rightLegSpread = 0.12;
+    setPoint(pose.leftElbow, -0.87, -0.18, 0.18);
+    setPoint(pose.leftHand, -0.2, -0.56, 0.45);
+    setPoint(pose.rightElbow, 1.26, 0.68, 0.04);
+    setPoint(pose.rightHand, 0.25, 1.33, 0.55);
+    return;
+  }
+  if (dance === "honey") {
+    const pump = Math.sin(cycle * 3);
+    pose.hop = 0.08 + Math.max(0, pump) * 0.13;
+    pose.lean = pump * 0.06;
+    pose.leftLegSwing = 0.22 + pump * 0.18;
+    pose.rightLegSwing = 0.22 - pump * 0.18;
+    pose.leftLegSpread = -0.1;
+    pose.rightLegSpread = 0.1;
+    setPoint(pose.leftElbow, -1.38, 0.54, 0.05);
+    setPoint(pose.leftHand, -1.16, 1.12 + pump * 0.2, 0.18);
+    setPoint(pose.rightElbow, 1.38, 0.54, 0.05);
+    setPoint(pose.rightHand, 1.16, 1.12 + pump * 0.2, 0.18);
+    return;
+  }
+  if (dance === "criss-cross") {
+    const cross = smoothBeat(Math.sin(cycle * 2));
+    pose.hop = 0.04 + Math.max(0, Math.sin(cycle * 4)) * 0.1;
+    pose.turn = Math.sin(cycle * 2) * 0.12;
+    pose.leftLegSpread = -0.27 + cross * 0.65;
+    pose.rightLegSpread = 0.27 - cross * 0.65;
+    pose.leftLegSwing = -0.12 + cross * 0.37;
+    pose.rightLegSwing = 0.25 - cross * 0.37;
+    setPoint(pose.leftElbow, -1.3 + cross * 0.9, 0.04 + cross * 0.09, 0.1 + cross * 0.25);
+    setPoint(pose.leftHand, -1.72 + cross * 2.2, -0.25 + cross * 0.37, 0.15 + cross * 0.4);
+    setPoint(pose.rightElbow, 1.3 - cross * 0.9, 0.04 + cross * 0.09, 0.1 + cross * 0.35);
+    setPoint(pose.rightHand, 1.72 - cross * 2.2, -0.25 + cross * 0.37, 0.15 + cross * 0.5);
+    return;
+  }
+  if (dance === "vegetable") {
+    const step = Math.sin(cycle * 2);
+    const leftStep = smoothBeat(step);
+    const leftLift = Math.max(0, step);
+    const rightLift = Math.max(0, -step);
+    pose.hop = 0.07 + Math.abs(step) * 0.08;
+    pose.lean = -0.12 + leftStep * 0.24;
+    pose.turn = -0.1 + leftStep * 0.2;
+    pose.leftLegLift = leftLift * 0.42;
+    pose.rightLegLift = rightLift * 0.42;
+    pose.leftLegSwing = -0.8 * leftLift;
+    pose.rightLegSwing = -0.8 * rightLift;
+    setPoint(pose.leftElbow, -1.1 - leftStep * 0.22, -0.16 + leftStep * 0.64, leftStep * 0.1);
+    setPoint(pose.leftHand, -1.02 - leftStep * 0.12, -0.57 + leftStep * 1.59, 0.02 + leftStep * 0.23);
+    setPoint(pose.rightElbow, 1.32 - leftStep * 0.22, 0.48 - leftStep * 0.64, 0.1 - leftStep * 0.1);
+    setPoint(pose.rightHand, 1.14 - leftStep * 0.12, 1.02 - leftStep * 1.59, 0.25 - leftStep * 0.23);
+    return;
+  }
+
+  const sway = Math.sin(cycle * 2);
+  pose.hop = 0.04 + Math.max(0, sway) * 0.06;
+  pose.lean = -0.12 + sway * 0.07;
+  pose.turn = -0.16 + sway * 0.08;
+  pose.headTilt = 0.11 + sway * 0.06;
+  pose.leftLegSwing = sway * 0.12;
+  pose.rightLegSwing = -sway * 0.12;
+  setPoint(pose.leftElbow, -0.87, -0.08, 0.1);
+  setPoint(pose.leftHand, -0.72, -0.49, 0.38);
+  setPoint(pose.rightElbow, 1.42, 0.68, 0.43);
+  setPoint(pose.rightHand, 2.08, 1.25, 1.1);
+}
+
+const shoulderLeft = new Vector3(-0.9, 0.46, 0);
+const shoulderRight = new Vector3(0.9, 0.46, 0);
+const down = new Vector3(0, -1, 0);
+const segmentStart = new Vector3();
+const segmentEnd = new Vector3();
+
+function pointToSegment(mesh: Mesh | null, start: Vector3 | Point, end: Point) {
+  if (!mesh) return;
+  if (start instanceof Vector3) segmentStart.copy(start);
+  else segmentStart.set(...start);
+  segmentEnd.set(...end);
+  mesh.position.copy(segmentStart).add(segmentEnd).multiplyScalar(0.5);
+  segmentEnd.sub(segmentStart);
+  const length = segmentEnd.length();
+  mesh.quaternion.setFromUnitVectors(down, segmentEnd.divideScalar(length));
+  mesh.scale.y = length;
+}
+
+const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble?: string }) {
   const root = useRef<Group>(null);
   const torso = useRef<Group>(null);
-  const leftArm = useRef<Group>(null);
-  const rightArm = useRef<Group>(null);
+  const head = useRef<Group>(null);
+  const leftUpperArm = useRef<Mesh>(null);
+  const leftForearm = useRef<Mesh>(null);
+  const rightUpperArm = useRef<Mesh>(null);
+  const rightForearm = useRef<Mesh>(null);
+  const leftHand = useRef<Group>(null);
+  const rightHand = useRef<Group>(null);
   const leftLeg = useRef<Group>(null);
   const rightLeg = useRef<Group>(null);
-  const face = useRef<Mesh>(null);
+  const previousDance = useRef<DanceId | null>(player.dance);
+  const danceStartedAt = useRef(0);
+  const currentPose = useMemo(createPose, []);
+  const targetPose = useMemo(createPose, []);
   const variant = useMemo(() => player.id.charCodeAt(0) % 3, [player.id]);
 
   useFrame(({ clock }, delta) => {
-    if (!root.current || !torso.current || !leftArm.current || !rightArm.current || !leftLeg.current || !rightLeg.current) return;
+    if (!root.current || !torso.current || !head.current || !leftLeg.current || !rightLeg.current) return;
     const t = clock.elapsedTime;
-    const rate = player.dance ? 8 : 2;
-    const beat = Math.sin(t * rate);
-    const sway = Math.cos(t * rate);
-    root.current.position.x += (player.x - root.current.position.x) * Math.min(1, delta * 12);
-    root.current.position.z += (player.z - root.current.position.z) * Math.min(1, delta * 12);
-    root.current.rotation.y += (player.facing - root.current.rotation.y) * Math.min(1, delta * 12);
-    root.current.position.y = player.dance ? Math.max(0, beat) * 0.18 : 0;
-    torso.current.rotation.z = player.dance ? beat * 0.11 : 0;
-    leftArm.current.rotation.z = player.dance ? -0.6 - beat * 0.8 : -0.08;
-    rightArm.current.rotation.z = player.dance ? 0.6 + sway * 0.8 : 0.08;
-    leftArm.current.rotation.x = player.dance === "selfie" ? -1.4 : 0;
-    rightArm.current.rotation.x = player.dance === "take-l" ? -0.8 : 0;
-    leftLeg.current.rotation.x = player.dance ? beat * 0.4 : 0;
-    rightLeg.current.rotation.x = player.dance ? -beat * 0.4 : 0;
-    if (player.dance === "criss-cross") {
-      leftLeg.current.rotation.z = beat * 0.35;
-      rightLeg.current.rotation.z = -beat * 0.35;
-    } else {
-      leftLeg.current.rotation.z = 0;
-      rightLeg.current.rotation.z = 0;
+    if (previousDance.current !== player.dance) {
+      previousDance.current = player.dance;
+      danceStartedAt.current = t;
     }
-    if (player.dance === "vegetable") torso.current.rotation.y = beat * 0.28;
-    else torso.current.rotation.y = 0;
-    if (player.dance === "honey") root.current.rotation.y += sway * 0.04;
-    if (face.current) face.current.rotation.z = player.dance ? beat * 0.06 : 0;
+    dancePose(player.dance, t - danceStartedAt.current, targetPose);
+    blendPose(currentPose, targetPose, 1 - Math.exp(-22 * delta));
+    const pose = currentPose;
+    const movementBlend = 1 - Math.exp(-12 * delta);
+    root.current.position.x += (player.x - root.current.position.x) * movementBlend;
+    root.current.position.z += (player.z - root.current.position.z) * movementBlend;
+    const facingDelta = player.facing - root.current.rotation.y;
+    root.current.rotation.y += Math.atan2(Math.sin(facingDelta), Math.cos(facingDelta)) * movementBlend;
+    root.current.position.y = pose.hop;
+    torso.current.rotation.z = pose.lean;
+    torso.current.rotation.y = pose.turn;
+    head.current.rotation.z = pose.headTilt;
+    pointToSegment(leftUpperArm.current, shoulderLeft, pose.leftElbow);
+    pointToSegment(leftForearm.current, pose.leftElbow, pose.leftHand);
+    pointToSegment(rightUpperArm.current, shoulderRight, pose.rightElbow);
+    pointToSegment(rightForearm.current, pose.rightElbow, pose.rightHand);
+    leftHand.current?.position.set(...pose.leftHand);
+    rightHand.current?.position.set(...pose.rightHand);
+    leftLeg.current.position.y = 0.9 + pose.leftLegLift;
+    rightLeg.current.position.y = 0.9 + pose.rightLegLift;
+    leftLeg.current.rotation.x = pose.leftLegSwing;
+    rightLeg.current.rotation.x = pose.rightLegSwing;
+    leftLeg.current.rotation.z = pose.leftLegSpread;
+    rightLeg.current.rotation.z = pose.rightLegSpread;
   });
 
   return <group ref={root} position={[player.x, 0, player.z]}>
     <group ref={torso} position={[0, 1.45, 0]}>
       <mesh castShadow position={[0, 0, 0]}><boxGeometry args={[1.34, 1.18, 0.78]} /><meshStandardMaterial color={player.color} roughness={0.7} /></mesh>
-      <mesh ref={face} castShadow position={[0, 0.98, 0]}><boxGeometry args={[0.95, 0.83, 0.77]} /><meshStandardMaterial color="#ffdfae" roughness={0.8} /></mesh>
-      <mesh position={[-0.2, 1.07, 0.39]}><boxGeometry args={[0.085, 0.09, 0.025]} /><meshBasicMaterial color="#262031" /></mesh>
-      <mesh position={[0.2, 1.07, 0.39]}><boxGeometry args={[0.085, 0.09, 0.025]} /><meshBasicMaterial color="#262031" /></mesh>
-      <mesh position={[0, 0.79, 0.39]}><boxGeometry args={[0.25, 0.05, 0.025]} /><meshBasicMaterial color="#ab655a" /></mesh>
-      {variant === 0 && <mesh position={[0, 1.44, 0]}><boxGeometry args={[1.02, 0.2, 0.87]} /><meshStandardMaterial color="#2d2435" /></mesh>}
-      {variant === 1 && <mesh position={[0, 1.41, -0.08]}><coneGeometry args={[0.32, 0.5, 5]} /><meshStandardMaterial color="#2d2435" /></mesh>}
-      <group ref={leftArm} position={[-0.9, 0.45, 0]}><mesh castShadow position={[0, -0.4, 0]}><boxGeometry args={[0.43, 0.88, 0.5]} /><meshStandardMaterial color={player.color} /></mesh></group>
-      <group ref={rightArm} position={[0.9, 0.45, 0]}><mesh castShadow position={[0, -0.4, 0]}><boxGeometry args={[0.43, 0.88, 0.5]} /><meshStandardMaterial color={player.color} /></mesh></group>
+      <group ref={head} position={[0, 0.98, 0]}>
+        <mesh castShadow><boxGeometry args={[0.95, 0.83, 0.77]} /><meshStandardMaterial color="#ffdfae" roughness={0.8} /></mesh>
+        <mesh position={[-0.2, 0.09, 0.39]}><boxGeometry args={[0.085, 0.09, 0.025]} /><meshBasicMaterial color="#262031" /></mesh>
+        <mesh position={[0.2, 0.09, 0.39]}><boxGeometry args={[0.085, 0.09, 0.025]} /><meshBasicMaterial color="#262031" /></mesh>
+        <mesh position={[0, -0.19, 0.39]}><boxGeometry args={[0.25, player.dance ? 0.13 : 0.05, 0.025]} /><meshBasicMaterial color="#ab655a" /></mesh>
+        {variant === 0 && <mesh position={[0, 0.46, 0]}><boxGeometry args={[1.02, 0.2, 0.87]} /><meshStandardMaterial color="#2d2435" /></mesh>}
+        {variant === 1 && <mesh position={[0, 0.43, -0.08]}><coneGeometry args={[0.32, 0.5, 5]} /><meshStandardMaterial color="#2d2435" /></mesh>}
+      </group>
+      <mesh ref={leftUpperArm} castShadow><boxGeometry args={[0.46, 1, 0.52]} /><meshStandardMaterial color={player.color} /></mesh>
+      <mesh ref={leftForearm} castShadow><boxGeometry args={[0.4, 1, 0.48]} /><meshStandardMaterial color={player.color} /></mesh>
+      <mesh ref={rightUpperArm} castShadow><boxGeometry args={[0.46, 1, 0.52]} /><meshStandardMaterial color={player.color} /></mesh>
+      <mesh ref={rightForearm} castShadow><boxGeometry args={[0.4, 1, 0.48]} /><meshStandardMaterial color={player.color} /></mesh>
+      <group ref={leftHand}><mesh castShadow><boxGeometry args={[0.4, 0.22, 0.48]} /><meshStandardMaterial color="#ffdfae" /></mesh></group>
+      <group ref={rightHand}>
+        {player.dance === "take-l" ? <group>
+          <mesh castShadow><boxGeometry args={[0.35, 0.3, 0.48]} /><meshStandardMaterial color="#ffdfae" /></mesh>
+          <mesh castShadow position={[-0.09, 0.25, 0]}><boxGeometry args={[0.14, 0.37, 0.28]} /><meshStandardMaterial color="#ffdfae" /></mesh>
+          <mesh castShadow position={[0.21, 0.08, 0]}><boxGeometry args={[0.35, 0.14, 0.28]} /><meshStandardMaterial color="#ffdfae" /></mesh>
+        </group> : <mesh castShadow><boxGeometry args={[0.4, 0.22, 0.48]} /><meshStandardMaterial color="#ffdfae" /></mesh>}
+        {player.dance === "selfie" && <mesh position={[0.06, 0.18, 0.08]} rotation={[0, 0, 0.25]}><boxGeometry args={[0.28, 0.46, 0.07]} /><meshStandardMaterial color="#272237" /></mesh>}
+      </group>
     </group>
     <group ref={leftLeg} position={[-0.31, 0.9, 0]}><mesh castShadow position={[0, -0.42, 0]}><boxGeometry args={[0.51, 0.86, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh><mesh castShadow position={[0, -0.77, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
     <group ref={rightLeg} position={[0.31, 0.9, 0]}><mesh castShadow position={[0, -0.42, 0]}><boxGeometry args={[0.51, 0.86, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh><mesh castShadow position={[0, -0.77, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
     <NameTag name={player.name} bubble={bubble} />
   </group>;
-}
+});
 
-function CameraAim() {
+function CameraAim({ focus }: { focus?: Player }) {
   const { camera } = useThree();
-  useEffect(() => { camera.lookAt(0, 0, 0); }, [camera]);
+  const target = useRef(new Vector3());
+  const lookTarget = useRef(new Vector3());
+  const desiredLookTarget = useRef(new Vector3());
+  useFrame((_, delta) => {
+    const x = focus?.x ?? 0;
+    const z = focus?.z ?? 0;
+    target.current.set(x, focus ? 9 : 19, z + (focus ? 11 : 22));
+    const blend = 1 - Math.exp(-4 * delta);
+    camera.position.lerp(target.current, blend);
+    desiredLookTarget.current.set(x, 0, z);
+    lookTarget.current.lerp(desiredLookTarget.current, blend);
+    camera.lookAt(lookTarget.current);
+  });
   return null;
 }
 
-function Scene({ players, bubbles }: { players: Player[]; bubbles: Record<string, string> }) {
+function Scene({ players, bubbles, focus }: { players: Player[]; bubbles: Record<string, string>; focus?: Player }) {
   return <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, 19, 22], fov: 44, near: 0.1, far: 100 }}>
-    <CameraAim />
+    <CameraAim focus={focus} />
     <color attach="background" args={["#90cbe5"]} />
     <ambientLight intensity={1.35} />
     <directionalLight position={[8, 18, 6]} intensity={2.1} castShadow shadow-mapSize={[1024, 1024]} />
@@ -156,7 +369,7 @@ function Scene({ players, bubbles }: { players: Player[]; bubbles: Record<string
 }
 
 export default function Game() {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(randomNickname);
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [selectedRoom, setSelectedRoom] = useState<number | null>(null);
   const [players, setPlayers] = useState<Record<string, Player>>({});
@@ -173,6 +386,8 @@ export default function Game() {
   const ownIdRef = useRef<string | null>(null);
   const mutedRef = useRef(false);
   const activeAudio = useRef(0);
+  const music = useRef<HTMLAudioElement | null>(null);
+  const voices = useRef(new Set<HTMLAudioElement>());
   const keys = useRef(new Set<string>());
   const joystickRef = useRef({ x: 0, z: 0 });
   const bubbleTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -181,9 +396,56 @@ export default function Game() {
   useEffect(() => { ownIdRef.current = ownId; }, [ownId]);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
 
+  const startMusic = useCallback(() => {
+    if (mutedRef.current || document.hidden || !music.current) return;
+    music.current.volume = activeAudio.current ? 0.04 : 0.16;
+    void music.current.play().catch(() => {});
+  }, []);
+
+  const stopVoices = useCallback(() => {
+    for (const audio of voices.current) audio.pause();
+    voices.current.clear();
+    activeAudio.current = 0;
+  }, []);
+
+  useEffect(() => {
+    if (!roomNumber) return;
+    startMusic();
+    const onVisibility = () => {
+      if (document.hidden) {
+        music.current?.pause();
+        stopVoices();
+      } else startMusic();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      music.current?.pause();
+      stopVoices();
+    };
+  }, [roomNumber, startMusic, stopVoices]);
+
+  useEffect(() => {
+    const audio = music.current;
+    return () => {
+      audio?.pause();
+      stopVoices();
+    };
+  }, [stopVoices]);
+
+  const toggleSound = () => {
+    const next = !muted;
+    mutedRef.current = next;
+    setMuted(next);
+    if (next) {
+      music.current?.pause();
+      stopVoices();
+    } else startMusic();
+  };
+
   const refreshRooms = useCallback(async () => {
     try {
-      const response = await fetch(`${GAME_SERVER}/rooms`, { cache: "no-store" });
+      const response = await fetch(`${gameServerUrl()}/rooms`, { cache: "no-store" });
       if (!response.ok) throw new Error("room list unavailable");
       const data = await response.json() as { rooms: RoomInfo[] };
       setRooms(data.rooms);
@@ -203,7 +465,7 @@ export default function Game() {
   }, [refreshRooms]);
 
   const playDance = useCallback((id: DanceId, dancerId: string) => {
-    if (mutedRef.current || activeAudio.current >= 3) return;
+    if (mutedRef.current || document.hidden || activeAudio.current >= 3) return;
     const dancer = playersRef.current[dancerId];
     const self = playersRef.current[ownIdRef.current || ""];
     if (dancerId !== ownIdRef.current && (!dancer || !self || Math.hypot(dancer.x - self.x, dancer.z - self.z) > 7)) return;
@@ -211,8 +473,17 @@ export default function Game() {
     if (!dance) return;
     const audio = new Audio(dance.audio);
     audio.volume = dancerId === ownIdRef.current ? 0.8 : 0.35;
+    voices.current.add(audio);
     activeAudio.current += 1;
-    const finished = () => { activeAudio.current = Math.max(0, activeAudio.current - 1); };
+    if (music.current) music.current.volume = 0.04;
+    let released = false;
+    const finished = () => {
+      if (released) return;
+      released = true;
+      voices.current.delete(audio);
+      activeAudio.current = voices.current.size;
+      if (music.current) music.current.volume = activeAudio.current ? 0.04 : 0.16;
+    };
     audio.addEventListener("ended", finished, { once: true });
     audio.addEventListener("error", finished, { once: true });
     void audio.play().catch(finished);
@@ -224,10 +495,12 @@ export default function Game() {
       setError("닉네임은 한글·영문·숫자로 2~12자만 써 줘.");
       return;
     }
+    // Start inside the entry gesture so phone browsers can play audio.
+    startMusic();
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${GAME_SERVER}/rooms`, { cache: "no-store" });
+      const response = await fetch(`${gameServerUrl()}/rooms`, { cache: "no-store" });
       if (!response.ok) throw new Error("서버에 연결할 수 없어.");
       const available = (await response.json() as { rooms: RoomInfo[] }).rooms;
       setRooms(available);
@@ -242,7 +515,7 @@ export default function Game() {
       setRoomNumber(null);
       setOwnId(null);
       setPlayers({});
-      const client = new Client(GAME_SERVER);
+      const client = new Client(gameServerUrl());
       const source = new URLSearchParams(window.location.search).get("src");
       const room = await client.joinById(chosen.id, { name: nickname, source: source === "openchat" ? source : undefined });
       roomRef.current = room;
@@ -286,11 +559,12 @@ export default function Game() {
       setRoomNumber(snapshot.number);
       window.history.replaceState(null, "", `/?room=${snapshot.number}`);
     } catch (reason) {
+      if (!roomRef.current) music.current?.pause();
       setError(reason instanceof Error ? reason.message : "입장하지 못했어. 다시 시도해 줘.");
     } finally {
       setBusy(false);
     }
-  }, [name, playDance]);
+  }, [name, playDance, startMusic]);
 
   useEffect(() => {
     if (!roomNumber) return;
@@ -301,7 +575,10 @@ export default function Game() {
       }
       if (event.repeat || event.target instanceof HTMLInputElement) return;
       const dance = DANCES.find((item) => item.key.toLowerCase() === event.key.toLowerCase());
-      if (dance) roomRef.current?.send("dance", dance.id);
+      if (dance) {
+        startMusic();
+        roomRef.current?.send("dance", dance.id);
+      }
     };
     const onKeyUp = (event: KeyboardEvent) => keys.current.delete(event.key);
     window.addEventListener("keydown", onKeyDown);
@@ -321,7 +598,7 @@ export default function Game() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [roomNumber]);
+  }, [roomNumber, startMusic]);
 
   const leave = async () => {
     const room = roomRef.current;
@@ -359,13 +636,14 @@ export default function Game() {
   const currentDance = ownId ? players[ownId]?.dance : null;
 
   return <>
+    <audio ref={music} src="/audio/playground.wav" loop preload="none" />
     <div className="game-shell">
       <section className="stage-panel" aria-label="춤추는 놀이터">
-        <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} /></div>
+        <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} focus={ownId ? players[ownId] : undefined} /></div>
         <div className="brand-badge"><span className="brand-icon">L</span><span>TAKE THE L</span></div>
         {!roomNumber ? <form className="join-panel" onSubmit={(event) => { event.preventDefault(); void join(selectedRoom ?? undefined); }}>
           <h1>L을 가져가!</h1>
-          <label htmlFor="nickname">닉네임</label>
+          <label htmlFor="nickname">닉네임 · 바꿔도 돼</label>
           <input id="nickname" autoComplete="off" maxLength={12} value={name}
             onChange={(event) => setName(event.target.value)} placeholder="닉네임을 써 줘" />
           <div className="room-grid" aria-label="공개방 선택">
@@ -389,7 +667,7 @@ export default function Game() {
             <div className="menu-body">
               <div className="playing-actions">
                 <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "링크 복사"}</button>
-                <button onClick={() => setMuted(!muted)}>{muted ? "소리 켜기" : "소리 끄기"}</button>
+                <button onClick={toggleSound}>{muted ? "소리 켜기" : "소리 끄기"}</button>
                 <button onClick={() => void leave()}>나가기</button>
               </div>
               <div className="bubble-panel"><span>말풍선</span><div>{BUBBLES.map((text) => <button key={text} onClick={() => roomRef.current?.send("bubble", text)}>{text}</button>)}</div></div>
@@ -402,7 +680,7 @@ export default function Game() {
         {roomNumber && <>
           <div className="dance-tray">{DANCES.map((dance) => <button key={dance.id}
             className={currentDance === dance.id ? "active" : ""}
-            onClick={() => roomRef.current?.send("dance", dance.id)}>
+            onClick={() => { startMusic(); roomRef.current?.send("dance", dance.id); }}>
             <kbd>{dance.key}</kbd><span>{dance.title}</span>
           </button>)}</div>
           <div className="joystick" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); moveJoystick(event); }}
