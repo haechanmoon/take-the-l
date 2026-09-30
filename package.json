@@ -1,0 +1,11 @@
+{
+  "name": "take-the-l",
+  "private": true,
+  "workspaces": ["web", "server"],
+  "scripts": {
+    "dev:web": "npm run dev -w web",
+    "dev:server": "npm run dev -w server",
+    "build": "npm run build -w server && npm run build -w web",
+    "check": "npm run check -w server && npm run check -w web"
+  }
+}
