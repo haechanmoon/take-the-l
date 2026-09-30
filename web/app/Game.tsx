@@ -84,6 +84,13 @@ type Pose = {
   lean: number;
   turn: number;
   headTilt: number;
+  bodySway: number;
+  bodyPitch: number;
+  headPitch: number;
+  leftKnee: number;
+  rightKnee: number;
+  leftFoot: number;
+  rightFoot: number;
   leftElbow: Point;
   leftHand: Point;
   rightElbow: Point;
@@ -110,6 +117,8 @@ function createPose(): Pose {
     lean: 0,
     turn: 0,
     headTilt: 0,
+    bodySway: 0, bodyPitch: 0, headPitch: 0,
+    leftKnee: 0, rightKnee: 0, leftFoot: 0, rightFoot: 0,
     leftElbow: [-1.05, -0.05, 0], leftHand: [-1.02, -0.57, 0.03],
     rightElbow: [1.05, -0.05, 0], rightHand: [1.02, -0.57, 0.03],
     leftLegLift: 0, rightLegLift: 0,
@@ -124,7 +133,7 @@ function setPoint(point: Point, x: number, y: number, z: number) {
   point[2] = z;
 }
 
-const poseNumbers = ["hop", "lean", "turn", "headTilt", "leftLegLift", "rightLegLift", "leftLegSwing", "rightLegSwing", "leftLegSpread", "rightLegSpread"] as const;
+const poseNumbers = ["hop", "lean", "turn", "headTilt", "bodySway", "bodyPitch", "headPitch", "leftKnee", "rightKnee", "leftFoot", "rightFoot", "leftLegLift", "rightLegLift", "leftLegSwing", "rightLegSwing", "leftLegSpread", "rightLegSpread"] as const;
 const posePoints = ["leftElbow", "leftHand", "rightElbow", "rightHand"] as const;
 
 function blendPose(current: Pose, target: Pose, amount: number) {
@@ -151,17 +160,25 @@ function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
 
   const cycle = seconds / DANCE_SECONDS[dance] * Math.PI * 2;
   if (dance === "take-l") {
-    const step = Math.sin(cycle * 4);
-    const kick = Math.cos(cycle * 4);
-    pose.hop = 0.08 + Math.max(0, step) * 0.17;
-    pose.lean = kick * 0.11;
+    const kick = Math.sin(cycle * 2);
+    const left = Math.max(0, kick);
+    const right = Math.max(0, -kick);
+    const recoil = 0.5 + 0.5 * Math.cos(cycle * 4);
+    pose.hop = 0.02 + recoil * 0.18;
+    pose.bodySway = -kick * 0.14;
+    pose.bodyPitch = -0.06 + recoil * 0.07;
+    pose.lean = kick * 0.15;
+    pose.turn = kick * 0.1;
     pose.headTilt = -0.1;
-    pose.leftLegLift = Math.max(0, kick) * 0.28;
-    pose.rightLegLift = Math.max(0, -kick) * 0.28;
-    pose.leftLegSwing = 0.35 + kick * 0.35;
-    pose.rightLegSwing = 0.35 - kick * 0.35;
-    pose.leftLegSpread = -0.12;
-    pose.rightLegSpread = 0.12;
+    pose.headPitch = recoil * 0.04;
+    pose.leftLegSwing = -left * 1.05 - recoil * 0.12;
+    pose.rightLegSwing = -right * 1.05 - recoil * 0.12;
+    pose.leftKnee = 0.15 + recoil * 0.65 * (1 - left);
+    pose.rightKnee = 0.15 + recoil * 0.65 * (1 - right);
+    pose.leftFoot = -left * 0.22;
+    pose.rightFoot = -right * 0.22;
+    pose.leftLegSpread = -0.08 - left * 0.32;
+    pose.rightLegSpread = 0.08 + right * 0.32;
     setPoint(pose.leftElbow, -0.87, -0.18, 0.18);
     setPoint(pose.leftHand, -0.2, -0.56, 0.45);
     setPoint(pose.rightElbow, 1.26, 0.68, 0.04);
@@ -170,12 +187,24 @@ function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
   }
   if (dance === "honey") {
     const pump = Math.sin(cycle * 3);
-    pose.hop = 0.08 + Math.max(0, pump) * 0.13;
-    pose.lean = pump * 0.06;
-    pose.leftLegSwing = 0.22 + pump * 0.18;
-    pose.rightLegSwing = 0.22 - pump * 0.18;
-    pose.leftLegSpread = -0.1;
-    pose.rightLegSpread = 0.1;
+    const sway = Math.sin(cycle);
+    const crouch = 0.5 - pump * 0.5;
+    pose.hop = -crouch * 0.13 + Math.max(0, pump) * 0.11;
+    pose.bodySway = sway * 0.22;
+    pose.bodyPitch = crouch * 0.12;
+    pose.headPitch = -crouch * 0.08;
+    pose.lean = -sway * 0.12;
+    pose.turn = sway * 0.15;
+    pose.leftLegSwing = -0.12 - crouch * 0.38;
+    pose.rightLegSwing = -0.12 - crouch * 0.38;
+    pose.leftKnee = 0.24 + crouch * 0.76;
+    pose.rightKnee = 0.24 + crouch * 0.76;
+    pose.leftLegLift = Math.max(0, sway) * 0.08;
+    pose.rightLegLift = Math.max(0, -sway) * 0.08;
+    pose.leftFoot = -pose.leftLegSwing - pose.leftKnee;
+    pose.rightFoot = -pose.rightLegSwing - pose.rightKnee;
+    pose.leftLegSpread = -0.15 - Math.max(0, sway) * 0.15;
+    pose.rightLegSpread = 0.15 + Math.max(0, -sway) * 0.15;
     setPoint(pose.leftElbow, -1.38, 0.54, 0.05);
     setPoint(pose.leftHand, -1.16, 1.12 + pump * 0.2, 0.18);
     setPoint(pose.rightElbow, 1.38, 0.54, 0.05);
@@ -184,12 +213,22 @@ function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
   }
   if (dance === "criss-cross") {
     const cross = smoothBeat(Math.sin(cycle * 2));
-    pose.hop = 0.04 + Math.max(0, Math.sin(cycle * 4)) * 0.1;
+    const bounce = 0.5 + 0.5 * Math.cos(cycle * 4);
+    const lead = Math.sin(cycle);
+    pose.hop = 0.02 + bounce * 0.2;
+    pose.bodySway = lead * 0.1;
+    pose.bodyPitch = bounce * 0.1;
+    pose.headPitch = -bounce * 0.07;
+    pose.lean = lead * 0.1;
     pose.turn = Math.sin(cycle * 2) * 0.12;
-    pose.leftLegSpread = -0.27 + cross * 0.65;
-    pose.rightLegSpread = 0.27 - cross * 0.65;
-    pose.leftLegSwing = -0.12 + cross * 0.37;
-    pose.rightLegSwing = 0.25 - cross * 0.37;
+    pose.leftLegSpread = -0.4 + cross * 0.95;
+    pose.rightLegSpread = 0.4 - cross * 0.95;
+    pose.leftLegSwing = -0.22 - lead * cross * 0.35;
+    pose.rightLegSwing = -0.22 + lead * cross * 0.35;
+    pose.leftKnee = 0.2 + bounce * 0.48;
+    pose.rightKnee = 0.2 + bounce * 0.48;
+    pose.leftFoot = -0.12 - lead * 0.18;
+    pose.rightFoot = -0.12 + lead * 0.18;
     setPoint(pose.leftElbow, -1.3 + cross * 0.9, 0.04 + cross * 0.09, 0.1 + cross * 0.25);
     setPoint(pose.leftHand, -1.72 + cross * 2.2, -0.25 + cross * 0.37, 0.15 + cross * 0.4);
     setPoint(pose.rightElbow, 1.3 - cross * 0.9, 0.04 + cross * 0.09, 0.1 + cross * 0.35);
@@ -201,13 +240,20 @@ function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
     const leftStep = smoothBeat(step);
     const leftLift = Math.max(0, step);
     const rightLift = Math.max(0, -step);
-    pose.hop = 0.07 + Math.abs(step) * 0.08;
+    pose.hop = 0.02 + (0.5 + 0.5 * Math.cos(cycle * 4)) * 0.13;
+    pose.bodySway = -step * 0.13;
+    pose.bodyPitch = Math.abs(step) * 0.1;
+    pose.headPitch = -Math.abs(step) * 0.06;
     pose.lean = -0.12 + leftStep * 0.24;
     pose.turn = -0.1 + leftStep * 0.2;
-    pose.leftLegLift = leftLift * 0.42;
-    pose.rightLegLift = rightLift * 0.42;
-    pose.leftLegSwing = -0.8 * leftLift;
-    pose.rightLegSwing = -0.8 * rightLift;
+    pose.leftLegSwing = -1.2 * leftLift;
+    pose.rightLegSwing = -1.2 * rightLift;
+    pose.leftKnee = 0.15 + leftLift * 1.15;
+    pose.rightKnee = 0.15 + rightLift * 1.15;
+    pose.leftFoot = -leftLift * 0.22;
+    pose.rightFoot = -rightLift * 0.22;
+    pose.leftLegSpread = -leftLift * 0.12;
+    pose.rightLegSpread = rightLift * 0.12;
     setPoint(pose.leftElbow, -1.1 - leftStep * 0.22, -0.16 + leftStep * 0.64, leftStep * 0.1);
     setPoint(pose.leftHand, -1.02 - leftStep * 0.12, -0.57 + leftStep * 1.59, 0.02 + leftStep * 0.23);
     setPoint(pose.rightElbow, 1.32 - leftStep * 0.22, 0.48 - leftStep * 0.64, 0.1 - leftStep * 0.1);
@@ -216,12 +262,22 @@ function dancePose(dance: DanceId | null, seconds: number, pose: Pose) {
   }
 
   const sway = Math.sin(cycle * 2);
-  pose.hop = 0.04 + Math.max(0, sway) * 0.06;
+  const tap = 0.5 + 0.5 * Math.cos(cycle * 4);
+  pose.hop = 0.01 + tap * 0.06;
+  pose.bodySway = sway * 0.22;
+  pose.bodyPitch = tap * 0.04;
+  pose.headPitch = -tap * 0.04;
   pose.lean = -0.12 + sway * 0.07;
   pose.turn = -0.16 + sway * 0.08;
   pose.headTilt = 0.11 + sway * 0.06;
-  pose.leftLegSwing = sway * 0.12;
-  pose.rightLegSwing = -sway * 0.12;
+  pose.leftLegSwing = -0.1 - Math.max(0, sway) * 0.28;
+  pose.rightLegSwing = -0.1 - Math.max(0, -sway) * 0.28;
+  pose.leftKnee = 0.15 + Math.max(0, sway) * 0.4;
+  pose.rightKnee = 0.15 + Math.max(0, -sway) * 0.4;
+  pose.leftLegSpread = -0.06 - Math.max(0, sway) * 0.22;
+  pose.rightLegSpread = 0.06 + Math.max(0, -sway) * 0.22;
+  pose.leftFoot = -pose.leftLegSwing - pose.leftKnee + tap * 0.08;
+  pose.rightFoot = -pose.rightLegSwing - pose.rightKnee + tap * 0.08;
   setPoint(pose.leftElbow, -0.87, -0.08, 0.1);
   setPoint(pose.leftHand, -0.72, -0.49, 0.38);
   setPoint(pose.rightElbow, 1.42, 0.68, 0.43);
@@ -246,8 +302,22 @@ function pointToSegment(mesh: Mesh | null, start: Vector3 | Point, end: Point) {
   mesh.scale.y = length;
 }
 
+// Lowest corner of the shoe after hip, knee and ankle rotation, in avatar space.
+function shoeBottom(swing: number, spread: number, knee: number, ankle: number, lift: number) {
+  const hipY = Math.cos(swing) * Math.cos(spread);
+  const hipZ = Math.sin(swing);
+  const footAngle = knee + ankle;
+  const footY = hipY * Math.cos(footAngle) - hipZ * Math.sin(footAngle);
+  const footZ = -hipY * Math.sin(footAngle) - hipZ * Math.cos(footAngle);
+  return 0.9 + lift - 0.43 * hipY
+    - 0.34 * (hipY * Math.cos(knee) - hipZ * Math.sin(knee)) + 0.17 * footZ
+    - 0.28 * Math.abs(Math.cos(swing) * Math.sin(spread))
+    - 0.11 * Math.abs(footY) - 0.37 * Math.abs(footZ);
+}
+
 const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble?: string }) {
   const root = useRef<Group>(null);
+  const body = useRef<Group>(null);
   const torso = useRef<Group>(null);
   const head = useRef<Group>(null);
   const leftUpperArm = useRef<Mesh>(null);
@@ -258,6 +328,10 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
   const rightHand = useRef<Group>(null);
   const leftLeg = useRef<Group>(null);
   const rightLeg = useRef<Group>(null);
+  const leftKnee = useRef<Group>(null);
+  const rightKnee = useRef<Group>(null);
+  const leftFoot = useRef<Group>(null);
+  const rightFoot = useRef<Group>(null);
   const previousDance = useRef<DanceId | null>(player.dance);
   const danceStartedAt = useRef(0);
   const currentPose = useMemo(createPose, []);
@@ -279,10 +353,17 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
     root.current.position.z += (player.z - root.current.position.z) * movementBlend;
     const facingDelta = player.facing - root.current.rotation.y;
     root.current.rotation.y += Math.atan2(Math.sin(facingDelta), Math.cos(facingDelta)) * movementBlend;
-    root.current.position.y = pose.hop;
+    const floor = Math.min(
+      shoeBottom(pose.leftLegSwing, pose.leftLegSpread, pose.leftKnee, pose.leftFoot, pose.leftLegLift),
+      shoeBottom(pose.rightLegSwing, pose.rightLegSpread, pose.rightKnee, pose.rightFoot, pose.rightLegLift),
+    );
+    root.current.position.y = Math.max(pose.hop, 0.02 - floor);
+    if (body.current) body.current.position.x = pose.bodySway;
     torso.current.rotation.z = pose.lean;
     torso.current.rotation.y = pose.turn;
+    torso.current.rotation.x = pose.bodyPitch;
     head.current.rotation.z = pose.headTilt;
+    head.current.rotation.x = pose.headPitch;
     pointToSegment(leftUpperArm.current, shoulderLeft, pose.leftElbow);
     pointToSegment(leftForearm.current, pose.leftElbow, pose.leftHand);
     pointToSegment(rightUpperArm.current, shoulderRight, pose.rightElbow);
@@ -295,9 +376,14 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
     rightLeg.current.rotation.x = pose.rightLegSwing;
     leftLeg.current.rotation.z = pose.leftLegSpread;
     rightLeg.current.rotation.z = pose.rightLegSpread;
+    if (leftKnee.current) leftKnee.current.rotation.x = pose.leftKnee;
+    if (rightKnee.current) rightKnee.current.rotation.x = pose.rightKnee;
+    if (leftFoot.current) leftFoot.current.rotation.x = pose.leftFoot;
+    if (rightFoot.current) rightFoot.current.rotation.x = pose.rightFoot;
   });
 
   return <group ref={root} position={[player.x, 0, player.z]}>
+    <group ref={body}>
     <group ref={torso} position={[0, 1.45, 0]}>
       <mesh castShadow position={[0, 0, 0]}><boxGeometry args={[1.34, 1.18, 0.78]} /><meshStandardMaterial color={player.color} roughness={0.7} /></mesh>
       <group ref={head} position={[0, 0.98, 0]}>
@@ -322,8 +408,21 @@ const Avatar = memo(function Avatar({ player, bubble }: { player: Player; bubble
         {player.dance === "selfie" && <mesh position={[0.06, 0.18, 0.08]} rotation={[0, 0, 0.25]}><boxGeometry args={[0.28, 0.46, 0.07]} /><meshStandardMaterial color="#272237" /></mesh>}
       </group>
     </group>
-    <group ref={leftLeg} position={[-0.31, 0.9, 0]}><mesh castShadow position={[0, -0.42, 0]}><boxGeometry args={[0.51, 0.86, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh><mesh castShadow position={[0, -0.77, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
-    <group ref={rightLeg} position={[0.31, 0.9, 0]}><mesh castShadow position={[0, -0.42, 0]}><boxGeometry args={[0.51, 0.86, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh><mesh castShadow position={[0, -0.77, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
+    <group ref={leftLeg} position={[-0.31, 0.9, 0]}>
+      <mesh castShadow position={[0, -0.215, 0]}><boxGeometry args={[0.51, 0.43, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh>
+      <group ref={leftKnee} position={[0, -0.43, 0]}>
+        <mesh castShadow position={[0, -0.215, 0]}><boxGeometry args={[0.5, 0.43, 0.54]} /><meshStandardMaterial color="#39435c" /></mesh>
+        <group ref={leftFoot} position={[0, -0.34, 0]}><mesh castShadow position={[0, 0, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
+      </group>
+    </group>
+    <group ref={rightLeg} position={[0.31, 0.9, 0]}>
+      <mesh castShadow position={[0, -0.215, 0]}><boxGeometry args={[0.51, 0.43, 0.55]} /><meshStandardMaterial color="#39435c" /></mesh>
+      <group ref={rightKnee} position={[0, -0.43, 0]}>
+        <mesh castShadow position={[0, -0.215, 0]}><boxGeometry args={[0.5, 0.43, 0.54]} /><meshStandardMaterial color="#39435c" /></mesh>
+        <group ref={rightFoot} position={[0, -0.34, 0]}><mesh castShadow position={[0, 0, 0.17]}><boxGeometry args={[0.56, 0.22, 0.74]} /><meshStandardMaterial color="#252839" /></mesh></group>
+      </group>
+    </group>
+    </group>
     <NameTag name={player.name} bubble={bubble} />
   </group>;
 });
@@ -636,7 +735,7 @@ export default function Game() {
   const currentDance = ownId ? players[ownId]?.dance : null;
 
   return <>
-    <audio ref={music} src="/audio/playground.wav" loop preload="none" />
+    <audio ref={music} src="/audio/bgm-no-voice.wav" loop preload="none" />
     <div className="game-shell">
       <section className="stage-panel" aria-label="춤추는 놀이터">
         <div className="stage-canvas"><Scene players={roomNumber ? playerList : DEMO_PLAYERS} bubbles={bubbles} focus={ownId ? players[ownId] : undefined} /></div>
@@ -662,12 +761,18 @@ export default function Game() {
           {error && <p role="alert" className="error-text">{error} <button type="button" onClick={() => void refreshRooms()}>다시 연결</button></p>}
         </form> : <div className="game-hud">
           <div className="room-badge"><span className="live-dot" /> {roomNumber}번방 <small>{playerList.length}/20</small></div>
+          <button className="sound-toggle" onClick={toggleSound} aria-label={muted ? "소리 켜기" : "소리 끄기"}
+            aria-pressed={muted} title={muted ? "소리 켜기" : "소리 끄기"}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+              {muted ? <path d="m3 3 18 18" /> : <><path d="M15 8a6 6 0 0 1 0 8" /><path d="M18 5a10 10 0 0 1 0 14" /></>}
+            </svg>
+          </button>
           <details className="playing-menu">
             <summary aria-label="게임 메뉴">☰</summary>
             <div className="menu-body">
               <div className="playing-actions">
                 <button onClick={() => void copyLink()}>{copied ? "복사했어!" : "링크 복사"}</button>
-                <button onClick={toggleSound}>{muted ? "소리 켜기" : "소리 끄기"}</button>
                 <button onClick={() => void leave()}>나가기</button>
               </div>
               <div className="bubble-panel"><span>말풍선</span><div>{BUBBLES.map((text) => <button key={text} onClick={() => roomRef.current?.send("bubble", text)}>{text}</button>)}</div></div>
